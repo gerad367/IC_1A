@@ -7,7 +7,7 @@
 // 10 segundos). Cada vez que la alarma se active, se generará una cadena de texto con la fecha
 // y la hora.
 
-// [ ] - 3. Esta cadena de texto deberá salvarse a un fichero que se habrá creado en el chip de memoria
+// [/] - 3. Esta cadena de texto deberá salvarse a un fichero que se habrá creado en el chip de memoria
 // externa FLASH de la tarjeta.
 
 // [ ] - 4. Finalmente, poner el microcontrolador en modo sleep por tiempo indefinido. Se despertará
@@ -18,6 +18,18 @@
 // cuando se lleva a tierra. Esta interrupción puede ocurrir en cualquier momento y el
 // firmware deberá proceder como en el objetivo 2, pero indicando que esa línea se añade
 // debido a una interrupción externa.
+
+// Proceso para guardar la información en la memoria flash
+// [x] - 1. Importar la librería y declarar el pin SPI
+// [x] - 2. Desactivar el módulo LoRa
+// [x] - 3. Inicializar la memoria flash
+// [x] - 4. Borrar el chip
+// [x] - 5. Formatear el sistema de ficheros
+// [ ] - 6. Montar el sistema de ficheros
+
+#include <Arduino_MKRMEM.h>
+Arduino_W25Q16DV flash(SPI1, FLASH_CS);
+char filename[] = "datos.txt";
 
 #include <time.h>
 #include <RTCZero.h>
@@ -30,8 +42,37 @@ volatile uint16_t _rtcFlag = 0;
 
 void setup()
 {
+  // Desactivamos el módulo LoRa
+  pinMode(LORA_RESET, OUTPUT);
+  digitalWrite(LORA_RESET, LOW);
+
   SerialUSB.begin(115200);
   while(!SerialUSB) {;}
+
+  // Inicializamos la memoria flash
+  flash.begin();
+
+  // Borramos el chip y formateamos el FS
+  flash.eraseChip();
+
+  // NOTA: En el código de ejemplo, entre el eraseChip() y el format() se monta y se desmonta el sistema de ficheros.
+  // Como desconozco su motivo me rehuso a ponerlo hasta comprobar que sea necesario.
+
+  // Formateamos el sistema de ficheros
+  int res = filesystem.format();
+  if (res != SPIFFS_OK) {
+    SerialUSB.print("format() failed with error code: ");
+    SerialUSB.println(res);
+    exit(EXIT_FAILURE);
+  }
+
+  // Montamos el sistema de ficheros
+  res = filesystem.mount();
+  if (res != SPIFFS_OK) {
+    SerialUSB.print("mount() failed with error code: ");
+    SerialUSB.println(res);
+    return;
+  }
 
   SerialUSB.print(__DATE__);
   SerialUSB.print(" ");
@@ -47,6 +88,7 @@ void setup()
     while (1) { ; }
   }
 
+  // Configuramos la alarma
   rtc.setAlarmEpoch(rtc.getEpoch() + ALARM_PERIOD_SECS);
   rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS)
   rtc.attachInterrupt(alarmCallback);
