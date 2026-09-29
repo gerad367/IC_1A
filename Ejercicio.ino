@@ -25,7 +25,11 @@
 // [x] - 3. Inicializar la memoria flash
 // [x] - 4. Borrar el chip
 // [x] - 5. Formatear el sistema de ficheros
-// [ ] - 6. Montar el sistema de ficheros
+// [x] - 6. Montar el sistema de ficheros
+// [x] - 7. Crear el fichero
+// [x] - 8. Abrir el fichero
+// [x] - 9. Escribir en el fichero
+// [x] - 10. Cerrar el fichero
 
 #include <Arduino_MKRMEM.h>
 Arduino_W25Q16DV flash(SPI1, FLASH_CS);
@@ -39,6 +43,11 @@ char filename[] = "datos.txt";
 RTCZero rtc;
 
 volatile uint16_t _rtcFlag = 0;
+
+void exit_error() {
+  filesystem.unmount();
+  exit(EXIT_FAILURE);
+}
 
 void setup()
 {
@@ -71,7 +80,15 @@ void setup()
   if (res != SPIFFS_OK) {
     SerialUSB.print("mount() failed with error code: ");
     SerialUSB.println(res);
-    return;
+    exit(EXIT_FAILURE);
+  }
+
+  File file = filesystem.open(filename, CREATE | TRUNCATE);
+  if (!file) {
+    SerialUSB.print("Creation of file ");
+    SerialUSB.print(filename);
+    SerialUSB.print(" failed. Aborting ...");
+    exit_error();
   }
 
   SerialUSB.print(__DATE__);
@@ -99,8 +116,32 @@ void loop()
 {
   if ( _rtcFlag ) {
     // Se ha activado la alarma. Se registra la lectura
-    serialUSB.print("Lectura por alarma: ");
-    printDateTime();
+    char* dateTime = getDateTime();
+    char[64] dateBuff;
+    snprintf(dateBuff, sizeof(dateBuff), "Lectura por alarma: %s\n", dateTime);
+    serialUSB.println(dateBuff);
+
+    // Abrimos el fichero para su lectura
+    File file = filesystem.open(filename, WRITE_ONLY | APPEND);
+    if (!file) {
+      SerialUSB.print("Opening file ");
+      SerialUSB.print(filename);
+      SerialUSB.print(" failed for reading. Aborting ...");
+      exit_error();
+    }
+
+    // Escribimos en el fichero
+    int bytes_to_write = strlen(dateBuff);
+    int bytes_written = file.write((void *)dateBuff, bytes_to_write);
+    if (bytes_to_write != bytes_written) {
+      SerialUSB.print("write() failed with error code "); 
+      SerialUSB.println(filesystem.err());
+      SerialUSB.println("Aborting ...");
+      exit_error();
+    }
+
+    file.close();
+
     _rtcFlag--;
   }
 }
@@ -129,7 +170,7 @@ bool setDateTime(const char * date_str, const char * time_str)
 }
 
 
-void printDateTime()
+char* getDateTime()
 {
   const char *weekDay[7] = { "Sun", "Mon", "Tue", "Wed", "Thr", "Fri", "Sat" };
 
@@ -147,7 +188,7 @@ void printDateTime()
            stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday, 
            stm.tm_hour, stm.tm_min, stm.tm_sec);
 
-  SerialUSB.println(dateTime);
+  return dateTime;
 }
 
 
