@@ -10,7 +10,7 @@
 // [/] - 3. Esta cadena de texto deberá salvarse a un fichero que se habrá creado en el chip de memoria
 // externa FLASH de la tarjeta.
 
-// [ ] - 4. Finalmente, poner el microcontrolador en modo sleep por tiempo indefinido. Se despertará
+// [x] - 4. Finalmente, poner el microcontrolador en modo sleep por tiempo indefinido. Se despertará
 // cuando se active la alarma del RTC.
 
 // [ ] - 5. Complementariamente, permitir que el microcontrolador pueda registrar otra interrupción
@@ -30,6 +30,8 @@
 // [x] - 8. Abrir el fichero
 // [x] - 9. Escribir en el fichero
 // [x] - 10. Cerrar el fichero
+
+#include <ArduinoLowPower.h>
 
 #include <Arduino_MKRMEM.h>
 Arduino_W25Q16DV flash(SPI1, FLASH_CS);
@@ -95,6 +97,9 @@ void setup()
   SerialUSB.print(" ");
   SerialUSB.println(__TIME__);
 
+  // Ajustamos que la alarma despierte al micro
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, alarmCallback, CHANGE);
+
   // Habilitamos el uso del rtc
   rtc.begin();
 
@@ -110,6 +115,7 @@ void setup()
   rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS)
   rtc.attachInterrupt(alarmCallback);
 
+  LowPower.sleep();
 }
 
 void loop()
@@ -144,6 +150,7 @@ void loop()
 
     _rtcFlag--;
   }
+  LowPower.sleep();
 }
 
 
