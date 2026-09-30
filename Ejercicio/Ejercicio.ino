@@ -40,11 +40,13 @@ char filename[] = "datos.txt";
 #include <time.h>
 #include <RTCZero.h>
 
-#define ALARM_PERIOD_SECS 10
+#define ALARM_PERIOD_SECS 3
 
 RTCZero rtc;
 
 volatile uint16_t _rtcFlag = 0;
+char dateBuff[64];
+char dateTime[32];
 
 void exit_error() {
   filesystem.unmount();
@@ -66,11 +68,16 @@ void setup()
   // Borramos el chip y formateamos el FS
   flash.eraseChip();
 
-  // NOTA: En el código de ejemplo, entre el eraseChip() y el format() se monta y se desmonta el sistema de ficheros.
-  // Como desconozco su motivo me rehuso a ponerlo hasta comprobar que sea necesario.
+  int res = filesystem.mount();
+  if (res != SPIFFS_OK && res != SPIFFS_ERR_NOT_A_FS) {
+    SerialUSB.println("mount() failed with error code "); SerialUSB.println(res); return;
+  }
+
+  SerialUSB.println("Unmounting ...");
+  filesystem.unmount();
 
   // Formateamos el sistema de ficheros
-  int res = filesystem.format();
+  res = filesystem.format();
   if (res != SPIFFS_OK) {
     SerialUSB.print("format() failed with error code: ");
     SerialUSB.println(res);
@@ -112,9 +119,10 @@ void setup()
 
   // Configuramos la alarma
   rtc.setAlarmEpoch(rtc.getEpoch() + ALARM_PERIOD_SECS);
-  rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS)
+  rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS);
   rtc.attachInterrupt(alarmCallback);
 
+  SerialUSB.println("Sleeping");
   LowPower.sleep();
 }
 
@@ -122,10 +130,9 @@ void loop()
 {
   if ( _rtcFlag ) {
     // Se ha activado la alarma. Se registra la lectura
-    char* dateTime = getDateTime();
-    char[64] dateBuff;
+    getDateTime();
     snprintf(dateBuff, sizeof(dateBuff), "Lectura por alarma: %s\n", dateTime);
-    serialUSB.println(dateBuff);
+    SerialUSB.println(dateBuff);
 
     // Abrimos el fichero para su lectura
     File file = filesystem.open(filename, WRITE_ONLY | APPEND);
@@ -177,7 +184,7 @@ bool setDateTime(const char * date_str, const char * time_str)
 }
 
 
-char* getDateTime()
+void getDateTime()
 {
   const char *weekDay[7] = { "Sun", "Mon", "Tue", "Wed", "Thr", "Fri", "Sat" };
 
@@ -189,13 +196,11 @@ char* getDateTime()
   gmtime_r(&epoch, &stm);
 
   // Generamos e imprimimos la fecha y la hora
-  char dateTime[32]; 
+   
   snprintf(dateTime, sizeof(dateTime),"%s %4u/%02u/%02u %02u:%02u:%02u",
            weekDay[stm.tm_wday], 
            stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday, 
            stm.tm_hour, stm.tm_min, stm.tm_sec);
-
-  return dateTime;
 }
 
 
