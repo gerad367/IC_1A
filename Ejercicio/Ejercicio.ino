@@ -40,7 +40,7 @@ char filename[] = "datos.txt";
 #include <time.h>
 #include <RTCZero.h>
 
-#define ALARM_PERIOD_SECS 10
+#define ALARM_PERIOD_SECS 3
 #define INTERRUPT_PIN 5
 #define ellapsedTime_ms(since_ms) (uint32_t)(millis() - since_ms)
 
@@ -140,10 +140,16 @@ void loop()
   if ( _intFlag ) {
     // Se ha activado la alarma. Se registra la lectura
     getDateTime();
-    const char *reason = _rtcFlag ? "alarma" : "pin";
+    char *reason;
+    if ( _rtcFlag > 0 )
+      reason = "alarma";
+    else
+      reason = "pin";
+    
     snprintf(dateBuff, sizeof(dateBuff), "Lectura por %s: %s\n", reason, dateTime);
     SerialUSB.println(dateBuff);
     SerialUSB.println(_pinFlag);
+    SerialUSB.println(_rtcFlag);
 
     // Abrimos el fichero para su lectura
     File file = filesystem.open(filename, WRITE_ONLY | APPEND);
@@ -167,7 +173,7 @@ void loop()
     file.close();
 
     _intFlag--;
-    _rtcFlag--;
+    if (_rtcFlag) _rtcFlag--;
   }
   LowPower.sleep();
 }
