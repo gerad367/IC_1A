@@ -7,13 +7,13 @@
 // 10 segundos). Cada vez que la alarma se active, se generará una cadena de texto con la fecha
 // y la hora.
 
-// [/] - 3. Esta cadena de texto deberá salvarse a un fichero que se habrá creado en el chip de memoria
+// [x] - 3. Esta cadena de texto deberá salvarse a un fichero que se habrá creado en el chip de memoria
 // externa FLASH de la tarjeta.
 
 // [x] - 4. Finalmente, poner el microcontrolador en modo sleep por tiempo indefinido. Se despertará
 // cuando se active la alarma del RTC.
 
-// [ ] - 5. Complementariamente, permitir que el microcontrolador pueda registrar otra interrupción
+// [x] - 5. Complementariamente, permitir que el microcontrolador pueda registrar otra interrupción
 // (un flanco de bajada) a través de un pin digital, configurado como entrada en modo pull-up,
 // cuando se lleva a tierra. Esta interrupción puede ocurrir en cualquier momento y el
 // firmware deberá proceder como en el objetivo 2, pero indicando que esa línea se añade
@@ -40,11 +40,16 @@ char filename[] = "datos.txt";
 #include <time.h>
 #include <RTCZero.h>
 
-#define ALARM_PERIOD_SECS 3
+#define ALARM_PERIOD_SECS 10
+#define INTERRUPT_PIN 5
+#define ellapsedTime_ms(since_ms) (uint32_t)(millis() - since_ms)
 
 RTCZero rtc;
 
+volatile uint16_t _intFlag = 0;
 volatile uint16_t _rtcFlag = 0;
+volatile uint16_t _pinFlag = 0;
+
 char dateBuff[64];
 char dateTime[32];
 
@@ -100,6 +105,10 @@ void setup()
     exit_error();
   }
 
+  pinMode(INTERRUPT_PIN, INPUT_PULLUP); 
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), pinCallback, FALLING);
+
+
   SerialUSB.print(__DATE__);
   SerialUSB.print(" ");
   SerialUSB.println(__TIME__);
@@ -128,11 +137,13 @@ void setup()
 
 void loop()
 {
-  if ( _rtcFlag ) {
+  if ( _intFlag ) {
     // Se ha activado la alarma. Se registra la lectura
     getDateTime();
-    snprintf(dateBuff, sizeof(dateBuff), "Lectura por alarma: %s\n", dateTime);
+    const char *reason = _rtcFlag ? "alarma" : "pin";
+    snprintf(dateBuff, sizeof(dateBuff), "Lectura por %s: %s\n", reason, dateTime);
     SerialUSB.println(dateBuff);
+    SerialUSB.println(_pinFlag);
 
     // Abrimos el fichero para su lectura
     File file = filesystem.open(filename, WRITE_ONLY | APPEND);
@@ -155,6 +166,7 @@ void loop()
 
     file.close();
 
+    _intFlag--;
     _rtcFlag--;
   }
   LowPower.sleep();
@@ -206,7 +218,13 @@ void getDateTime()
 
 void alarmCallback()
 {
+  _intFlag++;
   _rtcFlag++;
-
   rtc.setAlarmEpoch(rtc.getEpoch() + ALARM_PERIOD_SECS);
+}
+
+void pinCallback()
+{
+  _intFlag++;
+  _pinFlag++;
 }
