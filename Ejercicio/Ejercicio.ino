@@ -31,6 +31,11 @@
 // [x] - 9. Escribir en el fichero
 // [x] - 10. Cerrar el fichero
 
+// [x] - Configurar Pin 0 en modo PullUp
+// Si cuando arranca el programa, el pin está a tierra, formatear el sistema de ficheros
+
+// [x] - Cuando el Pin 1 se lleve a tierra, terminar el muestreo e imprimirlo por el serial
+
 #include <ArduinoLowPower.h>
 
 #include <Arduino_MKRMEM.h>
@@ -42,9 +47,10 @@ char filename[] = "datos.txt";
 
 #define ALARM_PERIOD_SECS 3
 #define INTERRUPT_PIN 5
+#define STOP_PIN      1
 
 #define ellapsedTime_ms(since_ms) (uint32_t)(millis() - since_ms)
-const uint32_t inhibitionTime_ms = 500;
+const uint32_t inhibitionTime_ms = 100;
 volatile uint32_t lastInt_ms = 0;
 
 RTCZero rtc;
@@ -52,6 +58,7 @@ RTCZero rtc;
 volatile uint16_t _intFlag = 0;
 volatile uint16_t _rtcFlag = 0;
 volatile uint16_t _pinFlag = 0;
+volatile uint16_t _finished = 0;
 
 char dateBuff[64];
 char dateTime[32];
@@ -59,6 +66,27 @@ char dateTime[32];
 void exit_error() {
   filesystem.unmount();
   exit(EXIT_FAILURE);
+}
+
+void flash_mem_reset()
+{
+  // Borramos el chip y formateamos el FS
+  flash.eraseChip();
+
+  int res = filesystem.mount();
+  if (res != SPIFFS_OK && res != SPIFFS_ERR_NOT_A_FS) {
+    SerialUSB.println("mount() failed with error code "); SerialUSB.println(res); return;
+  }
+
+  filesystem.unmount();
+
+  // Formateamos el sistema de ficheros
+  res = filesystem.format();
+  if (res != SPIFFS_OK) {
+    SerialUSB.print("format() failed with error code: ");
+    SerialUSB.println(res);
+    exit(EXIT_FAILURE);
+  }
 }
 
 void setup()
@@ -74,34 +102,24 @@ void setup()
   // Inicializamos la memoria flash
   flash.begin();
 
-  // Borramos el chip y formateamos el FS
-  flash.eraseChip();
-
-  int res = filesystem.mount();
-  if (res != SPIFFS_OK && res != SPIFFS_ERR_NOT_A_FS) {
-    SerialUSB.println("mount() failed with error code "); SerialUSB.println(res); return;
-  }
-
-  SerialUSB.println("Unmounting ...");
-  filesystem.unmount();
-
-  // Formateamos el sistema de ficheros
-  res = filesystem.format();
-  if (res != SPIFFS_OK) {
-    SerialUSB.print("format() failed with error code: ");
-    SerialUSB.println(res);
-    exit(EXIT_FAILURE);
+  pinMode(0, INPUT_PULLUP);  
+  if (digitalRead(0) == 0) {
+    SerialUSB.println("Formateando el sistema de ficheros:");
+    flash_mem_reset();
+    SerialUSB.println("Sistema de ficheros formateado");
+  } else {
+    SerialUSB.println("Usando sistema de ficheros existente");
   }
 
   // Montamos el sistema de ficheros
-  res = filesystem.mount();
+  int res = filesystem.mount();
   if (res != SPIFFS_OK) {
     SerialUSB.print("mount() failed with error code: ");
     SerialUSB.println(res);
     exit(EXIT_FAILURE);
   }
 
-  File file = filesystem.open(filename, CREATE | TRUNCATE);
+  File file = filesystem.open(filename, CREATE | APPEND);
   if (!file) {
     SerialUSB.print("Creation of file ");
     SerialUSB.print(filename);
@@ -110,7 +128,9 @@ void setup()
   }
 
   pinMode(INTERRUPT_PIN, INPUT_PULLUP); 
-  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), pinCallback, FALLING);
+  pinMode(STOP_PIN, INPUT_PULLUP);
+  LowPower.attachInterruptWakeup(digitalPinToInterrupt(INTERRUPT_PIN), pinCallback, FALLING);
+  LowPower.attachInterruptWakeup(digitalPinToInterrupt(STOP_PIN), stop_sampling, FALLING);
 
 
   SerialUSB.print(__DATE__);
@@ -135,16 +155,22 @@ void setup()
   rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS);
   rtc.attachInterrupt(alarmCallback);
 
-  //SerialUSB.println("Sleeping");
-  //delay(10);
-  //USBDevice.detach();
-
-  //LowPower.sleep();
-  //USBDevice.attach();
+  SerialUSB.println("Comenzando mediciones");
+  SerialUSB.end();
+  LowPower.sleep();
 }
 
 void loop()
 {
+  //digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
+  if (_finished) {
+    print_file();
+    while(1) {
+      LowPower.sleep();
+    }
+  }
+
   if ( _intFlag ) {
     // Se ha activado la alarma. Se registra la lectura
     getDateTime();
@@ -156,9 +182,7 @@ void loop()
 
     snprintf(dateBuff, sizeof(dateBuff), "Lectura por %s: %s\n", reason, dateTime);
     SerialUSB.println(dateBuff);
-    SerialUSB.println(_pinFlag);
-    SerialUSB.println(_rtcFlag);
-
+  
     // Abrimos el fichero para su lectura
     File file = filesystem.open(filename, WRITE_ONLY | APPEND);
     if (!file) {
@@ -186,12 +210,8 @@ void loop()
     else
       _pinFlag--;
   }
-  //USBDevice.detach();
-  //delay(10);
-  //LowPower.sleep();
-  //USBDevice.attach();
-  //SerialUSB.begin(115200);
-  //delay(10);
+
+  LowPower.sleep();
 }
 
 
@@ -242,7 +262,6 @@ void alarmCallback()
 {
   _intFlag++;
   _rtcFlag++;
-  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   rtc.setAlarmEpoch(rtc.getEpoch() + ALARM_PERIOD_SECS);
 }
 
@@ -253,4 +272,32 @@ void pinCallback()
     _pinFlag++;
     lastInt_ms = millis();
   }
+}
+
+void stop_sampling()
+{
+  _finished = 1;
+  rtc.detachInterrupt();
+  detachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN));
+  detachInterrupt(digitalPinToInterrupt(STOP_PIN));
+}
+
+void print_file()
+{
+  SerialUSB.begin(9600);
+  while (!SerialUSB) {;}
+  SerialUSB.println("Finalizado");
+
+  char buffer[512];
+
+  File file = filesystem.open(filename, READ_ONLY);
+  int bytes_read = file.read(buffer, sizeof(buffer));
+  SerialUSB.write(buffer, bytes_read);
+  while (bytes_read == sizeof(buffer)) {
+    bytes_read = file.read(buffer, sizeof(buffer));
+    SerialUSB.write(buffer, bytes_read);
+  }
+
+  file.close();
+  SerialUSB.end();
 }
