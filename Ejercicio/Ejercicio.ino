@@ -42,7 +42,10 @@ char filename[] = "datos.txt";
 
 #define ALARM_PERIOD_SECS 3
 #define INTERRUPT_PIN 5
+
 #define ellapsedTime_ms(since_ms) (uint32_t)(millis() - since_ms)
+const uint32_t inhibitionTime_ms = 500;
+volatile uint32_t lastInt_ms = 0;
 
 RTCZero rtc;
 
@@ -62,6 +65,7 @@ void setup()
 {
   // Desactivamos el módulo LoRa
   pinMode(LORA_RESET, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LORA_RESET, LOW);
 
   SerialUSB.begin(115200);
@@ -131,8 +135,12 @@ void setup()
   rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS);
   rtc.attachInterrupt(alarmCallback);
 
-  SerialUSB.println("Sleeping");
-  LowPower.sleep();
+  //SerialUSB.println("Sleeping");
+  //delay(10);
+  //USBDevice.detach();
+
+  //LowPower.sleep();
+  //USBDevice.attach();
 }
 
 void loop()
@@ -145,7 +153,7 @@ void loop()
       reason = "alarma";
     else
       reason = "pin";
-    
+
     snprintf(dateBuff, sizeof(dateBuff), "Lectura por %s: %s\n", reason, dateTime);
     SerialUSB.println(dateBuff);
     SerialUSB.println(_pinFlag);
@@ -173,9 +181,17 @@ void loop()
     file.close();
 
     _intFlag--;
-    if (_rtcFlag) _rtcFlag--;
+    if (_rtcFlag)
+      _rtcFlag--;
+    else
+      _pinFlag--;
   }
-  LowPower.sleep();
+  //USBDevice.detach();
+  //delay(10);
+  //LowPower.sleep();
+  //USBDevice.attach();
+  //SerialUSB.begin(115200);
+  //delay(10);
 }
 
 
@@ -226,11 +242,15 @@ void alarmCallback()
 {
   _intFlag++;
   _rtcFlag++;
+  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   rtc.setAlarmEpoch(rtc.getEpoch() + ALARM_PERIOD_SECS);
 }
 
 void pinCallback()
 {
-  _intFlag++;
-  _pinFlag++;
+  if (ellapsedTime_ms(lastInt_ms) > inhibitionTime_ms) {
+    _intFlag++;
+    _pinFlag++;
+    lastInt_ms = millis();
+  }
 }
